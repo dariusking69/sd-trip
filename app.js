@@ -22,6 +22,8 @@
     queue: LS.get('sdtrip_queue', []),
     tab: 'now',
     budgetFilter: 'Us',
+    planMode: LS.get('sdtrip_planmode', 'plan'),
+    agDay: null,
     dayFilter: 'all',
     map: null, markers: {}, route: null, me: null, meMarker: null, meCircle: null, watchId: null, fitMe: true,
     syncing: false,
@@ -53,7 +55,28 @@
     const d = Math.floor(h / 24), hh = h % 24;
     return 'in ' + d + (d === 1 ? ' day' : ' days') + (hh ? ' ' + hh + ' h' : '');
   };
-  const events = () => (S.trip ? S.trip.events : []).map((e) => Object.assign({}, e, {
+  // ---------- conference agenda ----------
+  const agenda = () => (S.trip && S.trip.agenda) || null;
+  const agIso = (a, hm) => a.d + 'T' + hm + ':00' + agenda().offset;
+  const fmtHM = (hm) => { const [h, m] = hm.split(':').map(Number); return ((h + 11) % 12 + 1) + ':' + String(m).padStart(2, '0') + (h < 12 ? ' AM' : ' PM'); };
+  // Starred sessions live on this phone. Until someone changes them, the agenda's suggestions count as starred.
+  function picks() {
+    const p = LS.get('sdtrip_picks', null);
+    if (p) return p;
+    return agenda() ? agenda().items.filter((a) => a.pick).map((a) => a.id) : [];
+  }
+  function pickEvents() {
+    const ag = agenda();
+    if (!ag) return [];
+    const set = new Set(picks());
+    return ag.items.filter((a) => set.has(a.id) && !a.ev).map((a) => ({
+      id: a.id, day: a.d, at: agIso(a, a.s), tz: ag.tz, title: ag.attendee + ': ' + a.t,
+      note: [a.note, a.f, a.sp].filter(Boolean).join(' · '), place: ag.place, who: ag.attendee, alerts: [10],
+      mins: Math.round((Date.parse(agIso(a, a.e)) - Date.parse(agIso(a, a.s))) / 60000), kind: 'work',
+    }));
+  }
+  const allEvents = () => (S.trip ? S.trip.events : []).concat(pickEvents());
+  const events = () => allEvents().map((e) => Object.assign({}, e, {
     ts: Date.parse(e.at), te: Date.parse(e.at) + (e.mins || 30) * 60000,
   })).sort((a, b) => a.ts - b.ts);
 
@@ -284,12 +307,71 @@
     const next = evs.find((e) => e.ts > t);
     const days = [...new Set(evs.map((e) => e.day))];
     const sleep = S.trip.sleep || {};
-    v.innerHTML = days.map((d) => {
+    const ag = agenda();
+    const seg = ag ? '<div class="seg plan-seg">' + [['plan', 'Our plan'], ['agenda', ag.label || 'Agenda']].map(([k, l]) =>
+      '<button type="button" data-planmode="' + k + '" class="' + (S.planMode === k ? 'on' : '') + '">' + esc(l) + '</button>').join('') + '</div>' : '';
+    if (ag && S.planMode === 'agenda') { v.innerHTML = seg + renderAgenda(); return; }
+    v.innerHTML = seg + days.map((d) => {
       const list = evs.filter((e) => e.day === d);
       return '<div class="day-h" id="day-' + d + '"><h2>' + esc(dayLabel(d)) + '</h2><span>' + (sleep[d] ? 'Sleep: ' + esc(sleep[d]) : '') + '</span></div>' +
         '<ol class="tl">' + list.map((e, i) => eventRow(e, i, { nextId: next && next.id })).join('') + '</ol>';
     }).join('');
   }
+
+  const ICON_STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l2.6 5.5 6 .8-4.4 4.2 1.1 6-5.3-2.9-5.3 2.9 1.1-6L3.4 9.5l6-.8z"/></svg>';
+  const ICON_CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12.3l2.7 2.7L16.2 9.5"/></svg>';
+  const FMT_COLOR = { Keynote: 'gold', Talk: 'sky', Panel: 'teal', Workshop: 'coral', Debate: 'coral', Lightbulb: 'green', 'Performance Lab': 'muted' };
+  function renderAgenda() {
+    const ag = agenda();
+    const days = [...new Set(ag.items.map((a) => a.d))];
+    if (days.indexOf(S.agDay) < 0) S.agDay = days.indexOf(dayKeyNow()) > -1 ? dayKeyNow() : days[0];
+    const set = new Set(picks());
+    const t = Date.now();
+    let html = '<div class="ag-days">' + days.map((d) => {
+      const [wd, md] = dayLabel(d).split(', ');
+      const n = ag.items.filter((a) => a.d === d && set.has(a.id)).length;
+      return '<button type="button" data-agday="' + d + '" class="' + (d === S.agDay ? 'on' : '') + '">' + esc(wd) + '<small>' + esc(md) + '</small>' +
+        (n ? '<i class="ag-count">' + n + '</i>' : '') + '</button>';
+    }).join('') + '</div>';
+    if (ag.hint) html += '<p class="sub ag-hint">' + esc(ag.hint) + '</p>';
+    let slot = null, i = 0;
+    ag.items.filter((a) => a.d === S.agDay).forEach((a) => {
+      if (a.s !== slot) { html += (slot ? '</ol>' : '') + '<div class="ag-slot">' + esc(fmtHM(a.s)) + '</div><ol class="ag-list">'; slot = a.s; }
+      const picked = set.has(a.id);
+      const past = Date.parse(agIso(a, a.e)) < t;
+      html += '<li class="ag rise k-' + a.k + (picked ? ' picked' : '') + (a.ev ? ' onplan' : '') + (past ? ' past' : '') + '" style="--i:' + Math.min(i++, 10) + '">' +
+        '<div><h3>' + esc(a.t) + '</h3>' +
+        '<div class="ag-meta"><span class="mono">' + esc(fmtHM(a.s)) + ' to ' + esc(fmtHM(a.e)) + '</span>' +
+        (a.f ? '<span class="chip ' + (FMT_COLOR[a.f] || 'muted') + '">' + esc(a.f) + '</span>' : '') + (a.tr ? '<span>' + esc(a.tr) + '</span>' : '') + '</div>' +
+        (a.sp ? '<p class="ag-sp">' + esc(a.sp) + '</p>' : '') + (a.note ? '<p class="ag-note">' + esc(a.note) + '</p>' : '') + '</div>' +
+        (a.ev ? '<span class="ag-on" title="Already on the plan">' + ICON_CHECK + '</span>'
+          : '<button type="button" class="ag-star' + (picked ? ' on' : '') + '" data-pick="' + a.id + '" aria-pressed="' + picked + '" aria-label="' + (picked ? 'Remove from my plan' : 'Add to my plan') + '">' + ICON_STAR + '</button>') +
+        '</li>';
+    });
+    return html + (slot ? '</ol>' : '');
+  }
+  $('#view-plan').addEventListener('click', (e) => {
+    const m = e.target.closest('[data-planmode]');
+    if (m) { S.planMode = m.dataset.planmode; LS.set('sdtrip_planmode', S.planMode); renderPlan(); $('#view-plan').scrollTop = 0; return; }
+    const d = e.target.closest('[data-agday]');
+    if (d) { S.agDay = d.dataset.agday; renderPlan(); $('#view-plan').scrollTop = 0; return; }
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    const id = b.dataset.pick;
+    const list = picks().slice();
+    const on = list.indexOf(id) < 0;
+    if (on) list.push(id); else list.splice(list.indexOf(id), 1);
+    LS.set('sdtrip_picks', list);
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
+    b.setAttribute('aria-label', on ? 'Remove from my plan' : 'Add to my plan');
+    b.closest('.ag').classList.toggle('picked', on);
+    b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
+    const day = $('.ag-days .on');
+    if (day) { const n = agenda().items.filter((a) => a.d === S.agDay && list.indexOf(a.id) > -1).length; const c = day.querySelector('.ag-count'); if (n && c) c.textContent = n; else if (n) day.insertAdjacentHTML('beforeend', '<i class="ag-count">' + n + '</i>'); else if (c) c.remove(); }
+    const inCal = (LS.get('sdtrip_cal_ids', []) || []).indexOf(id) > -1;
+    toast(on ? 'On your plan. Add alerts again in Info for its alarm.' : (inCal ? 'Off your plan. Delete it from your calendar too.' : 'Off your plan'));
+    renderNow(); renderInfo();
+  });
 
   // ---------- map ----------
   function initMap() {
@@ -570,10 +652,13 @@
     const theme = document.documentElement.getAttribute('data-theme');
     const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
     const mine = calEvents();
+    const added = LS.get('sdtrip_cal_ids', null);
+    const fresh = added ? mine.filter((ev) => added.indexOf(calId(ev)) < 0).length : 0;
     let html = '';
     html += '<article class="card rise"><span class="label">Alerts on your phone</span>' +
       '<h2 class="h2" style="font-size:24px">Add the trip to your calendar</h2>' +
       '<p class="sub">' + mine.length + ' stops for ' + esc(S.who || 'this phone') + ', with alarms before the ones where you need to leave. Your phone does the reminding, even when this app is closed. Tap the button, then <b>Add All</b>. Do it once on each phone.</p>' +
+      (fresh ? '<p class="ag-note">' + fresh + (fresh === 1 ? ' stop is' : ' stops are') + ' new since you last added them. Tap the button again, then Add.</p>' : (added ? '<p class="sub">Added. Tap again after you star more sessions.</p>' : '')) +
       '<div class="row" style="margin-top:10px"><button type="button" class="btn primary" id="add-cal">Add alerts to my calendar</button></div></article>';
     if (!standalone) {
       html += '<article class="card rise" style="--i:1"><span class="label">Make it an app</span><p class="sub" style="margin:6px 0 0">In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. It opens full screen like an app and remembers the trip code.</p></article>';
@@ -592,8 +677,11 @@
   // Built on the phone from the loaded trip, so no second trip to Google (which breaks when the
   // phone is signed in to Google). Each phone gets the shared stops plus its own.
   function calEvents() {
-    return ((S.trip && S.trip.events) || []).filter((ev) => !ev.who || ev.who === 'Both' || !S.who || ev.who === S.who);
+    return allEvents().filter((ev) => !ev.who || ev.who === 'Both' || !S.who || ev.who === S.who);
   }
+  // iPhone adds new events on re-import but never updates ones it already has, so an event whose time
+  // changed (rev) gets a fresh id. The old copy has to be deleted by hand.
+  const calId = (ev) => ev.id + (ev.rev ? '-r' + ev.rev : '');
   function buildIcs() {
     const e = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
     const utc = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
@@ -606,7 +694,7 @@
       const start = new Date(ev.at);
       const end = new Date(start.getTime() + (ev.mins || 30) * 60000);
       const pl = ev.place ? places[ev.place] : null;
-      out.push('BEGIN:VEVENT', 'UID:' + ev.id + '@sd-trip', 'DTSTAMP:' + stamp, 'DTSTART:' + utc(start), 'DTEND:' + utc(end), 'SUMMARY:' + e(ev.title));
+      out.push('BEGIN:VEVENT', 'UID:' + calId(ev) + '@sd-trip', 'DTSTAMP:' + stamp, 'DTSTART:' + utc(start), 'DTEND:' + utc(end), 'SUMMARY:' + e(ev.title));
       if (pl) out.push('LOCATION:' + e(pl.q || (pl.name + (pl.area ? ', ' + pl.area : ''))));
       if (ev.note) out.push('DESCRIPTION:' + e(ev.note));
       (ev.alerts || []).forEach((m) => out.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + e(ev.title), 'TRIGGER:-PT' + Number(m) + 'M', 'END:VALARM'));
@@ -620,6 +708,8 @@
     const a = document.createElement('a');
     a.href = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(buildIcs());
     a.download = 'sd-trip.ics';
+    LS.set('sdtrip_cal_ids', calEvents().map(calId));
+    setTimeout(renderInfo, 800);
     a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
   }

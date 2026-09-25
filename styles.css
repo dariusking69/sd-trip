@@ -323,6 +323,51 @@ a { color: var(--gold); }
 @media (min-width: 720px) {
   .view:not(#view-map) { padding-inline: max(16px, calc((100% - 680px) / 2)); }
 }
+/* ---------- conference agenda (Plan tab) ---------- */
+.plan-seg { margin-bottom: 4px; }
+.ag-days { display: flex; gap: 6px; margin: 14px 0 6px; }
+.ag-days button {
+  position: relative; flex: 1; min-height: 56px; padding: 6px 0; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); cursor: pointer; display: grid; place-content: center; gap: 3px;
+  font-family: var(--display); font-weight: 800; font-size: 21px; line-height: 1; text-transform: uppercase;
+  transition: background .2s, border-color .2s, transform .12s var(--ease);
+}
+.ag-days button:active { transform: scale(.96); }
+.ag-days button small { font-family: var(--mono); font-weight: 500; font-size: 10.5px; letter-spacing: .06em; text-transform: none; color: var(--muted); }
+.ag-days button.on { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); }
+.ag-days button.on small { color: var(--gold-ink); opacity: .75; }
+.ag-count {
+  position: absolute; top: -6px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px;
+  background: var(--bg); color: var(--gold); border: 1px solid var(--gold); font: 700 11px/18px var(--mono); font-style: normal; animation: rise .3s var(--ease) both;
+}
+.ag-hint { margin: 8px 0 0; font-size: 13.5px; }
+.ag-slot { margin: 20px 0 8px; font-family: var(--mono); font-weight: 600; font-size: 13px; letter-spacing: .04em; color: var(--gold); }
+.ag-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ag {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 12px 10px 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface);
+  transition: border-color .25s, background .25s;
+}
+.ag h3 { margin: 0; font-size: 15.5px; line-height: 1.3; }
+.ag-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.ag-meta .mono { font-size: 12px; }
+.ag-sp { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.ag-note { margin: 6px 0 0; font-size: 13.5px; font-weight: 700; color: var(--gold); }
+.ag.k-meal, .ag.k-ongoing, .ag.k-event, .ag.k-wellness { background: transparent; }
+.ag.picked { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 9%, var(--surface)); }
+.ag.onplan { border-color: color-mix(in srgb, var(--teal) 55%, var(--line)); }
+.ag.past { opacity: .5; }
+.ag-star, .ag-on { width: 44px; height: 44px; display: grid; place-items: center; }
+.ag-star {
+  border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--muted); cursor: pointer;
+  transition: background .2s, color .2s, border-color .2s;
+}
+.ag-star svg, .ag-on svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ag-star.on { background: var(--gold); border-color: var(--gold); color: var(--gold-ink); }
+.ag-star.on svg { fill: currentColor; }
+.ag-star.pop { animation: starpop .38s var(--ease); }
+@keyframes starpop { 45% { transform: scale(1.2) rotate(-10deg); } }
+.ag-on { color: var(--teal); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
