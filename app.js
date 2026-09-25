@@ -778,9 +778,15 @@
       '<i class="tour-arrow" hidden></i><h2></h2><p></p><div class="tour-foot"><span class="tour-count"></span>' +
       '<button type="button" class="btn ghost sm" data-tour="skip">Skip</button><button type="button" class="btn primary sm" data-tour="next">Next</button></div></div>';
     document.body.appendChild(el);
+    // Act as soon as a finger lifts (snappier on phones); the click that follows the same tap is ignored.
+    const act = (b) => { if (b.dataset.tour === 'skip') endTour(); else tourStep(T.i + 1); };
+    el.addEventListener('pointerup', (e) => {
+      const b = e.target.closest('[data-tour]');
+      if (b && T && e.pointerType !== 'mouse') { T.tapAt = Date.now(); act(b); }
+    });
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-tour]');
-      if (b) { if (b.dataset.tour === 'skip') endTour(); else tourStep(T.i + 1); }
+      if (b && T && !(T.tapAt && Date.now() - T.tapAt < 800)) act(b);
     });
     tourStep(0);
   }

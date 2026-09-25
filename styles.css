@@ -378,7 +378,7 @@ a { color: var(--gold); }
   transition: left .35s var(--ease), top .35s var(--ease), width .35s var(--ease), height .35s var(--ease);
 }
 .tour-hole::after { content: ""; position: absolute; inset: -3px; border-radius: 19px; border: 2px solid var(--gold); animation: tourpulse 1.6s ease-out infinite; }
-@keyframes tourpulse { 0% { opacity: .95; transform: scale(1); } 100% { opacity: 0; transform: scale(1.07); } }
+@keyframes tourpulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--gold) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 12px transparent; } }
 .tour-bubble { position: absolute; padding: 16px 16px 12px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--gold); box-shadow: var(--shadow); color: var(--ink); }
 .tour-bubble.hide { visibility: hidden; }
 .tour-bubble.show { animation: tourin .34s var(--ease) both; }
