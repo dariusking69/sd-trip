@@ -1,7 +1,7 @@
 {
   "name": "SD Trip",
   "short_name": "SD Trip",
-  "start_url": "./",
+  "id": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

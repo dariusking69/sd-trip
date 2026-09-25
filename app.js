@@ -139,13 +139,17 @@
   // ---------- gate ----------
   function readHashKey() {
     const m = location.hash.match(/k=([A-Za-z0-9_-]{8,})/);
-    if (m) {
-      S.key = m[1]; LS.set('sdtrip_key', S.key);
-      history.replaceState(null, '', location.pathname + location.search);
-    }
+    if (m) { S.key = m[1]; LS.set('sdtrip_key', S.key); }
+    keepKeyInUrl();
+  }
+  // A Home Screen app on iPhone gets its own storage and starts from the page address,
+  // so the code stays in the address (the part after # never reaches any server).
+  function keepKeyInUrl() {
+    const want = S.key ? '#k=' + S.key : '';
+    if (location.hash !== want) history.replaceState(null, '', location.pathname + location.search + want);
   }
   function forgetKey(msg) {
-    S.key = null; LS.del('sdtrip_key'); LS.del('sdtrip_cache');
+    S.key = null; LS.del('sdtrip_key'); LS.del('sdtrip_cache'); keepKeyInUrl();
     $('#gate-msg').textContent = msg || 'Open the link you were sent, or enter the trip code.';
     $('#gate').hidden = false;
   }
@@ -161,7 +165,7 @@
     e.preventDefault();
     const v = $('#gate-code').value.trim().replace(/^.*k=/, '');
     if (v.length < 8) { $('#gate-msg').textContent = 'That code looks too short.'; return; }
-    S.key = v; LS.set('sdtrip_key', v);
+    S.key = v; LS.set('sdtrip_key', v); keepKeyInUrl();
     $('#gate').hidden = true;
     sync();
   });
@@ -565,12 +569,12 @@
     if (!S.trip) return;
     const theme = document.documentElement.getAttribute('data-theme');
     const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-    const icsUrl = API + (API.indexOf('?') > -1 ? '&' : '?') + 'op=ics&k=' + encodeURIComponent(S.key || '');
+    const mine = calEvents();
     let html = '';
     html += '<article class="card rise"><span class="label">Alerts on your phone</span>' +
       '<h2 class="h2" style="font-size:24px">Add the trip to your calendar</h2>' +
-      '<p class="sub">Every stop, with alarms before the ones where you need to leave. Your phone does the reminding, even when this app is closed. Open it on each phone and tap <b>Add All</b>.</p>' +
-      '<div class="row" style="margin-top:10px"><a class="btn primary" href="' + esc(icsUrl) + '">Add alerts to my calendar</a></div></article>';
+      '<p class="sub">' + mine.length + ' stops for ' + esc(S.who || 'this phone') + ', with alarms before the ones where you need to leave. Your phone does the reminding, even when this app is closed. Tap the button, then <b>Add All</b>. Do it once on each phone.</p>' +
+      '<div class="row" style="margin-top:10px"><button type="button" class="btn primary" id="add-cal">Add alerts to my calendar</button></div></article>';
     if (!standalone) {
       html += '<article class="card rise" style="--i:1"><span class="label">Make it an app</span><p class="sub" style="margin:6px 0 0">In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. It opens full screen like an app and remembers the trip code.</p></article>';
     }
@@ -583,6 +587,56 @@
     html += '<p class="sub" style="text-align:center">Spending saves to the Trip Budget tab in your Level 10 sheet.<br><button class="linkish" id="forget" type="button">Remove the trip code from this phone</button></p>';
     v.innerHTML = '<div class="stack">' + html + '</div>';
   }
+
+  // ---------- calendar ----------
+  // Built on the phone from the loaded trip, so no second trip to Google (which breaks when the
+  // phone is signed in to Google). Each phone gets the shared stops plus its own.
+  function calEvents() {
+    return ((S.trip && S.trip.events) || []).filter((ev) => !ev.who || ev.who === 'Both' || !S.who || ev.who === S.who);
+  }
+  function buildIcs() {
+    const e = (s) => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+    const utc = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const fold = (l) => { let o = ''; while (l.length > 74) { o += l.slice(0, 74) + '\r\n '; l = l.slice(74); } return o + l; };
+    const places = S.trip.places || {};
+    const out = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SD Trip//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+      'X-WR-CALNAME:' + e((S.trip.info && S.trip.info.calName) || 'SD Trip')];
+    const stamp = utc(new Date());
+    calEvents().forEach((ev) => {
+      const start = new Date(ev.at);
+      const end = new Date(start.getTime() + (ev.mins || 30) * 60000);
+      const pl = ev.place ? places[ev.place] : null;
+      out.push('BEGIN:VEVENT', 'UID:' + ev.id + '@sd-trip', 'DTSTAMP:' + stamp, 'DTSTART:' + utc(start), 'DTEND:' + utc(end), 'SUMMARY:' + e(ev.title));
+      if (pl) out.push('LOCATION:' + e(pl.q || (pl.name + (pl.area ? ', ' + pl.area : ''))));
+      if (ev.note) out.push('DESCRIPTION:' + e(ev.note));
+      (ev.alerts || []).forEach((m) => out.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + e(ev.title), 'TRIGGER:-PT' + Number(m) + 'M', 'END:VALARM'));
+      out.push('END:VEVENT');
+    });
+    out.push('END:VCALENDAR');
+    return out.map(fold).join('\r\n') + '\r\n';
+  }
+  function addToCalendar() {
+    if (!S.trip) return;
+    const a = document.createElement('a');
+    a.href = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(buildIcs());
+    a.download = 'sd-trip.ics';
+    a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  document.addEventListener('click', (e) => { if (e.target.closest('#add-cal')) addToCalendar(); });
+
+  // ---------- screen fit ----------
+  // iPhone Home Screen apps report a viewport shorter than the screen by the status bar, so size to the screen.
+  function fitScreen() {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+    const portrait = window.matchMedia('(orientation: portrait)').matches;
+    const gap = screen.height - window.innerHeight;
+    const st = document.documentElement.style;
+    if (standalone && portrait && gap > 0 && gap < 120) { st.setProperty('--app-h', screen.height + 'px'); st.setProperty('--vp-gap', gap + 'px'); }
+    else { st.removeProperty('--app-h'); st.removeProperty('--vp-gap'); }
+  }
+  fitScreen();
+  window.addEventListener('resize', fitScreen);
 
   // ---------- all ----------
   function renderAll() {
