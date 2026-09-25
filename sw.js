@@ -1,6 +1,6 @@
 /* Keeps the app shell available offline. Trip data is cached by the app itself, never here. */
 const CACHE = 'sdtrip-v2';
-const SHELL = ['./', 'index.html', 'styles.css?v=10', 'app.js?v=10', 'config.js?v=10', 'manifest.webmanifest',
+const SHELL = ['./', 'index.html', 'styles.css?v=12', 'app.js?v=12', 'config.js?v=12', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/apple-touch-icon.png',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css'];

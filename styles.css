@@ -90,7 +90,7 @@ a { color: var(--gold); }
 #view-map { padding: 0; overflow: hidden; }
 
 .tabs {
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
   padding: 6px 6px calc(env(safe-area-inset-bottom, 0px) + 6px);
   border-top: 1px solid var(--line);
   background: var(--bg);
@@ -100,6 +100,7 @@ a { color: var(--gold); }
   background: none; border: 0; color: var(--muted); cursor: pointer;
   font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
 }
+.tabs button[hidden] { display: none; }
 .tabs svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; transition: transform .25s var(--ease); }
 .tabs button[aria-current="page"] { color: var(--gold); }
 .tabs button[aria-current="page"] svg { transform: translateY(-1px) scale(1.08); }

@@ -55,13 +55,20 @@
     const d = Math.floor(h / 24), hh = h % 24;
     return 'in ' + d + (d === 1 ? ' day' : ' days') + (hh ? ' ' + hh + ' h' : '');
   };
+  // ---------- guests ----------
+  // A guest code (say, for a colleague) loads a read-only view: no budget, one person. Keep what it stores
+  // apart from the owner's, in case both codes are ever opened on the same phone.
+  const hasBudget = () => !!(S.trip && S.trip.budget);
+  const single = () => people().length === 1;
+  const lsKey = (k) => (S.guest ? k + ':guest' : k);
+
   // ---------- conference agenda ----------
   const agenda = () => (S.trip && S.trip.agenda) || null;
   const agIso = (a, hm) => a.d + 'T' + hm + ':00' + agenda().offset;
   const fmtHM = (hm) => { const [h, m] = hm.split(':').map(Number); return ((h + 11) % 12 + 1) + ':' + String(m).padStart(2, '0') + (h < 12 ? ' AM' : ' PM'); };
   // Starred sessions live on this phone. Until someone changes them, the agenda's suggestions count as starred.
   function picks() {
-    const p = LS.get('sdtrip_picks', null);
+    const p = LS.get(lsKey('sdtrip_picks'), null);
     if (p) return p;
     return agenda() ? agenda().items.filter((a) => a.pick).map((a) => a.id) : [];
   }
@@ -70,7 +77,7 @@
     if (!ag) return [];
     const set = new Set(picks());
     return ag.items.filter((a) => set.has(a.id) && !a.ev).map((a) => ({
-      id: a.id, day: a.d, at: agIso(a, a.s), tz: ag.tz, title: ag.attendee + ': ' + a.t,
+      id: a.id, day: a.d, at: agIso(a, a.s), tz: ag.tz, title: (single() ? '' : ag.attendee + ': ') + a.t,
       note: [a.note, a.f, a.sp].filter(Boolean).join(' · '), place: ag.place, who: ag.attendee, alerts: [10],
       mins: Math.round((Date.parse(agIso(a, a.e)) - Date.parse(agIso(a, a.s))) / 60000), kind: 'work',
     }));
@@ -122,11 +129,14 @@
       await flushQueue();
       const j = await post({ op: 'all' });
       if (!j.ok) {
-        if (j.error === 'bad_key') return forgetKey('That trip code did not work. Check the link you were sent.');
+        // Only forget a code that has never loaded the trip; a code that worked before gets a retry.
+        const c = LS.get('sdtrip_cache', null);
+        const workedBefore = c && c.trip && (!c.k || c.k === S.key);
+        if (j.error === 'bad_key' && !workedBefore) return forgetKey('That trip code did not work. Check the link you were sent.');
         throw new Error(j.error || 'failed');
       }
       applyData(j);
-      LS.set('sdtrip_cache', { trip: j.trip, expenses: j.expenses, at: Date.now() });
+      LS.set('sdtrip_cache', { k: S.key, guest: !!j.guest, trip: j.trip, expenses: j.expenses, at: Date.now() });
       setSync('ok', 'Synced ' + fmtClock(Date.now()));
     } catch (e) {
       const c = LS.get('sdtrip_cache', null);
@@ -151,10 +161,11 @@
 
   function applyData(j) {
     const first = !S.trip;
+    S.guest = !!j.guest;
     S.trip = j.trip;
     S.expenses = mergePending(j.expenses || []);
     renderAll();
-    if (first) initFormOptions();
+    if (first || !$('#f-cat').children.length) initFormOptions();
   }
   function mergePending(serverList) {
     const list = serverList.slice();
@@ -187,7 +198,7 @@
     applyTheme(LS.get('sdtrip_theme', 'dark'));
     if (!S.key) { $('#gate').hidden = false; return; }
     const c = LS.get('sdtrip_cache', null);
-    if (c) { applyData(c); setSync('ok', 'Saved copy'); }
+    if (c && (!c.k || c.k === S.key)) { applyData(c); setSync('ok', 'Saved copy'); }
     sync();
   }
   $('#gate-form').addEventListener('submit', (e) => {
@@ -212,6 +223,7 @@
   // ---------- tabs ----------
   $$('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
   function showTab(tab) {
+    if (tab === 'budget' && S.trip && !hasBudget()) tab = 'now';
     S.tab = tab;
     $$('.tabs [data-tab]').forEach((b) => b.toggleAttribute('aria-current', b.dataset.tab === tab));
     $$('.tabs [aria-current]').forEach((b) => b.setAttribute('aria-current', 'page'));
@@ -247,7 +259,7 @@
   // ---------- render: now ----------
   function whoChip(w) {
     const i = people().indexOf(w);
-    if (i < 0) return '';
+    if (i < 0 || single()) return '';
     return '<span class="chip ' + (i === 0 ? 'teal' : 'coral') + '">' + esc(w) + '</span>';
   }
   function eventRow(e, i, extra) {
@@ -290,7 +302,8 @@
     if (current) html += hero(current, true);
     if (next) html += hero(next, false);
     if (!current && !next) {
-      html += '<article class="next rise"><div class="next-top"><span class="label">Home again</span></div><h2>File the Atrium expense report this week.</h2><button class="btn sm" data-tabgo="budget">See the Atrium list</button></article>';
+      html += hasBudget() ? '<article class="next rise"><div class="next-top"><span class="label">Home again</span></div><h2>File the Atrium expense report this week.</h2><button class="btn sm" data-tabgo="budget">See the Atrium list</button></article>'
+        : '<article class="next rise"><div class="next-top"><span class="label">All done</span></div><h2>' + esc((S.trip.info && S.trip.info.doneNote) || 'That is the whole plan.') + '</h2></article>';
     }
 
     const today = dayKeyNow();
@@ -367,14 +380,14 @@
     const list = picks().slice();
     const on = list.indexOf(id) < 0;
     if (on) list.push(id); else list.splice(list.indexOf(id), 1);
-    LS.set('sdtrip_picks', list);
+    LS.set(lsKey('sdtrip_picks'), list);
     b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
     b.setAttribute('aria-label', on ? 'Remove from my plan' : 'Add to my plan');
     b.closest('.ag').classList.toggle('picked', on);
     b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
     const day = $('.ag-days .on');
     if (day) { const n = agenda().items.filter((a) => a.d === S.agDay && list.indexOf(a.id) > -1).length; const c = day.querySelector('.ag-count'); if (n && c) c.textContent = n; else if (n) day.insertAdjacentHTML('beforeend', '<i class="ag-count">' + n + '</i>'); else if (c) c.remove(); }
-    const inCal = (LS.get('sdtrip_cal_ids', []) || []).indexOf(id) > -1;
+    const inCal = (LS.get(lsKey('sdtrip_cal_ids'), []) || []).indexOf(id) > -1;
     toast(on ? 'On your plan. Add alerts again in Info for its alarm.' : (inCal ? 'Off your plan. Delete it from your calendar too.' : 'Off your plan'));
     renderNow(); renderInfo();
   });
@@ -493,11 +506,11 @@
   }
 
   // ---------- budget ----------
-  function cats() { return S.trip ? S.trip.budget.plan : []; }
+  function cats() { return hasBudget() ? S.trip.budget.plan : []; }
   function catLabel(id) { const c = cats().find((x) => x.id === id); return c ? c.label : id; }
   function renderBudget() {
     const v = $('#view-budget');
-    if (!S.trip) return;
+    if (!hasBudget()) return;
     const us = S.expenses.filter((x) => x.payer !== 'Atrium');
     const at = S.expenses.filter((x) => x.payer === 'Atrium');
     const sum = (l) => l.reduce((a, x) => a + (Number(x.amount) || 0), 0);
@@ -583,7 +596,7 @@
       }
       armed = null;
       S.expenses = S.expenses.filter((x) => x.id !== id);
-      S.queue.push({ op: 'delete', id }); LS.set('sdtrip_queue', S.queue);
+      S.queue.push({ op: 'delete', id, k: S.key }); LS.set('sdtrip_queue', S.queue);
       renderBudget(); toast('Deleted');
       sync(true);
     }
@@ -602,6 +615,7 @@
 
   // ---------- add sheet ----------
   function initFormOptions() {
+    if (!hasBudget()) return;
     $('#f-cat').innerHTML = cats().map((c, i) => '<button type="button" data-v="' + esc(c.id) + '" class="' + (c.id === 'food' ? 'on' : '') + '">' + esc(c.label) + '</button>').join('');
     $('#f-card').innerHTML = (S.trip.budget.cards || ['Capital One']).map((c) => '<option>' + esc(c) + '</option>').join('');
   }
@@ -639,7 +653,7 @@
       card: $('#f-card').value, by: S.who || '', status: 'paid',
     };
     S.expenses.push(Object.assign({ pending: true }, item));
-    S.queue.push({ op: 'add', item }); LS.set('sdtrip_queue', S.queue);
+    S.queue.push({ op: 'add', item, k: S.key }); LS.set('sdtrip_queue', S.queue);
     closeSheet();
     renderBudget();
     toast(money(amount) + ' added' + (payer === 'Atrium' ? ' to the Atrium list' : ''));
@@ -658,24 +672,24 @@
     const theme = document.documentElement.getAttribute('data-theme');
     const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
     const mine = calEvents();
-    const added = LS.get('sdtrip_cal_ids', null);
+    const added = LS.get(lsKey('sdtrip_cal_ids'), null);
     const fresh = added ? mine.filter((ev) => added.indexOf(calId(ev)) < 0).length : 0;
     let html = '';
     html += '<article class="card rise"><span class="label">Alerts on your phone</span>' +
       '<h2 class="h2" style="font-size:24px">Add the trip to your calendar</h2>' +
-      '<p class="sub">' + mine.length + ' stops for ' + esc(S.who || 'this phone') + ', with alarms before the ones where you need to leave. Your phone does the reminding, even when this app is closed. Tap the button, then <b>Add All</b>. Do it once on each phone.</p>' +
+      '<p class="sub">' + mine.length + ' stops for ' + esc(S.who || 'this phone') + ', with alarms before the ones where you need to leave. Your phone does the reminding, even when this app is closed. Tap the button, then <b>Add All</b>.' + (single() ? '' : ' Do it once on each phone.') + '</p>' +
       (fresh ? '<p class="ag-note">' + fresh + (fresh === 1 ? ' stop is' : ' stops are') + ' new since you last added them. Tap the button again, then Add.</p>' : (added ? '<p class="sub">Added. Tap again after you star more sessions.</p>' : '')) +
       '<div class="row" style="margin-top:10px"><button type="button" class="btn primary" id="add-cal">Add alerts to my calendar</button></div></article>';
     if (!standalone) {
       html += '<article class="card rise" style="--i:1"><span class="label">Make it an app</span><p class="sub" style="margin:6px 0 0">In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. It opens full screen like an app and remembers the trip code.</p></article>';
     }
     html += '<article class="card rise" style="--i:2"><span class="label">This phone</span>' +
-      '<div class="seg" style="margin-top:8px">' + people().map((w) => '<button type="button" data-who-set="' + esc(w) + '" class="' + (S.who === w ? 'on' : '') + '">' + esc(w) + '</button>').join('') + '</div>' +
+      (single() ? '' : '<div class="seg" style="margin-top:8px">' + people().map((w) => '<button type="button" data-who-set="' + esc(w) + '" class="' + (S.who === w ? 'on' : '') + '">' + esc(w) + '</button>').join('') + '</div>') +
       '<div class="seg" style="margin-top:8px">' + [['dark', 'Dark'], ['light', 'Light']].map(([k, l]) => '<button type="button" data-theme-set="' + k + '" class="' + (theme === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div></article>';
     html += '<article class="card rise" style="--i:3"><span class="label">Confirmations</span>' +
       (S.trip.info.confirmations || []).map((c) => '<div class="kv"><span>' + esc(c.label) + '</span><button class="btn sm" data-copy="' + esc(c.value) + '"><span class="v">' + esc(c.value) + '</span></button></div>').join('') + '</article>';
     html += '<article class="card rise" style="--i:4"><div class="stack">' + (S.trip.info.notes || []).map((n) => '<div class="note"><h3>' + esc(n.title) + '</h3><p>' + esc(n.body) + '</p></div>').join('') + '</div></article>';
-    html += '<p class="sub" style="text-align:center">Spending saves to the Trip Budget tab in your Level 10 sheet.<br><button class="linkish" id="forget" type="button">Remove the trip code from this phone</button></p>';
+    html += '<p class="sub" style="text-align:center">' + (hasBudget() ? 'Spending saves to the Trip Budget tab in your Level 10 sheet.<br>' : '') + '<button class="linkish" id="forget" type="button">Remove the trip code from this phone</button></p>';
     v.innerHTML = '<div class="stack">' + html + '</div>';
   }
 
@@ -714,7 +728,7 @@
     const a = document.createElement('a');
     a.href = 'data:text/calendar;charset=utf-8,' + encodeURIComponent(buildIcs());
     a.download = 'sd-trip.ics';
-    LS.set('sdtrip_cal_ids', calEvents().map(calId));
+    LS.set(lsKey('sdtrip_cal_ids'), calEvents().map(calId));
     setTimeout(renderInfo, 800);
     a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
@@ -737,7 +751,12 @@
   // ---------- all ----------
   function renderAll() {
     renderWho();
-    if (S.key && !S.who && people().length) $('#who').hidden = false;
+    if (single()) S.who = people()[0];
+    else if (S.who && people().indexOf(S.who) < 0) S.who = LS.get('sdtrip_who', null);
+    if (S.who && people().indexOf(S.who) < 0) S.who = null;
+    $('#who').hidden = !(S.key && !S.who && people().length);
+    $('.tabs [data-tab="budget"]').hidden = !hasBudget();
+    if (S.tab === 'budget' && !hasBudget()) showTab('now');
     renderHeader(); renderNow(); renderPlan(); renderBudget(); renderInfo();
     if (S.map) applyDayFilter(false);
   }
