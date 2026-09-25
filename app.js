@@ -166,6 +166,7 @@
     S.expenses = mergePending(j.expenses || []);
     renderAll();
     if (first || !$('#f-cat').children.length) initFormOptions();
+    maybeStartTour();
   }
   function mergePending(serverList) {
     const list = serverList.slice();
@@ -266,7 +267,7 @@
     const p = place(e.place);
     const t = Date.now();
     const cls = [e.te < t ? 'past' : '', extra && extra.nextId === e.id ? 'is-next' : ''].join(' ').trim();
-    return '<li class="rise ' + cls + '" style="--i:' + i + '">' +
+    return '<li class="rise ' + cls + '" style="--i:' + i + '" data-ev="' + esc(e.id) + '">' +
       '<div class="t">' + esc(fmtTime(e.at, e.tz)) + '<small>' + e.tz + '</small></div>' +
       '<div><h3>' + esc(e.title) + '</h3>' + (e.note ? '<p>' + esc(e.note) + '</p>' : '') +
       '<div class="meta">' + whoChip(e.who) +
@@ -681,15 +682,15 @@
       (fresh ? '<p class="ag-note">' + fresh + (fresh === 1 ? ' stop is' : ' stops are') + ' new since you last added them. Tap the button again, then Add.</p>' : (added ? '<p class="sub">Added. Tap again after you star more sessions.</p>' : '')) +
       '<div class="row" style="margin-top:10px"><button type="button" class="btn primary" id="add-cal">Add alerts to my calendar</button></div></article>';
     if (!standalone) {
-      html += '<article class="card rise" style="--i:1"><span class="label">Make it an app</span><p class="sub" style="margin:6px 0 0">In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. It opens full screen like an app and remembers the trip code.</p></article>';
+      html += '<article class="card rise" style="--i:1" id="make-app"><span class="label">Make it an app</span><p class="sub" style="margin:6px 0 0">In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. It opens full screen like an app and remembers the trip code.</p></article>';
     }
     html += '<article class="card rise" style="--i:2"><span class="label">This phone</span>' +
       (single() ? '' : '<div class="seg" style="margin-top:8px">' + people().map((w) => '<button type="button" data-who-set="' + esc(w) + '" class="' + (S.who === w ? 'on' : '') + '">' + esc(w) + '</button>').join('') + '</div>') +
       '<div class="seg" style="margin-top:8px">' + [['dark', 'Dark'], ['light', 'Light']].map(([k, l]) => '<button type="button" data-theme-set="' + k + '" class="' + (theme === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div></article>';
     html += '<article class="card rise" style="--i:3"><span class="label">Confirmations</span>' +
       (S.trip.info.confirmations || []).map((c) => '<div class="kv"><span>' + esc(c.label) + '</span><button class="btn sm" data-copy="' + esc(c.value) + '"><span class="v">' + esc(c.value) + '</span></button></div>').join('') + '</article>';
-    html += '<article class="card rise" style="--i:4"><div class="stack">' + (S.trip.info.notes || []).map((n) => '<div class="note"><h3>' + esc(n.title) + '</h3><p>' + esc(n.body) + '</p></div>').join('') + '</div></article>';
-    html += '<p class="sub" style="text-align:center">' + (hasBudget() ? 'Spending saves to the Trip Budget tab in your Level 10 sheet.<br>' : '') + '<button class="linkish" id="forget" type="button">Remove the trip code from this phone</button></p>';
+    html += '<article class="card rise" style="--i:4"><div class="stack">' + (S.trip.info.notes || []).map((n, i) => '<div class="note" data-note="' + i + '"><h3>' + esc(n.title) + '</h3><p>' + esc(n.body) + '</p></div>').join('') + '</div></article>';
+    html += '<p class="sub" style="text-align:center">' + (hasBudget() ? 'Spending saves to the Trip Budget tab in your Level 10 sheet.<br>' : '') + (S.trip.tour ? '<button class="linkish" id="replay-tour" type="button">Show the tour again</button><br>' : '') + '<button class="linkish" id="forget" type="button">Remove the trip code from this phone</button></p>';
     v.innerHTML = '<div class="stack">' + html + '</div>';
   }
 
@@ -747,6 +748,109 @@
   }
   fitScreen();
   window.addEventListener('resize', fitScreen);
+
+  // ---------- first-run tour ----------
+  // Bubbles pointing at features, written in the trip data (trip.tour) so each view can have its own.
+  // Shown once per phone; Info has "Show the tour again".
+  const TOUR_TARGETS = { next: '#view-now .next', star: '#view-plan .ag.k-session .ag-star', locate: '#locate', 'add-cal': '#add-cal', 'make-app': '#make-app' };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let T = null;
+  const tourKey = () => lsKey('sdtrip_tour:' + ((S.trip && S.trip.tour && S.trip.tour.id) || ''));
+  function tourTarget(t) {
+    if (!t) return null;
+    const [k, arg] = t.split(':');
+    if (k === 'event') return $('#view-plan [data-ev="' + arg + '"]');
+    if (k === 'note') return $('#view-info [data-note="' + arg + '"]');
+    return TOUR_TARGETS[k] ? $(TOUR_TARGETS[k]) : null;
+  }
+  function maybeStartTour() {
+    if (!S.trip || !S.trip.tour || T || S.tourAsked || LS.get(tourKey(), false)) return;
+    if (!$('#gate').hidden || !$('#who').hidden) return;
+    S.tourAsked = true;
+    setTimeout(startTour, 700);
+  }
+  function startTour() {
+    if (!S.trip || !S.trip.tour || T) return;
+    T = { i: -1, steps: S.trip.tour.steps || [] };
+    const el = document.createElement('div');
+    el.id = 'tour'; el.className = 'tour';
+    el.innerHTML = '<div class="tour-hole" hidden></div><div class="tour-bubble hide" role="dialog" aria-modal="true" aria-live="polite">' +
+      '<i class="tour-arrow" hidden></i><h2></h2><p></p><div class="tour-foot"><span class="tour-count"></span>' +
+      '<button type="button" class="btn ghost sm" data-tour="skip">Skip</button><button type="button" class="btn primary sm" data-tour="next">Next</button></div></div>';
+    document.body.appendChild(el);
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tour]');
+      if (b) { if (b.dataset.tour === 'skip') endTour(); else tourStep(T.i + 1); }
+    });
+    tourStep(0);
+  }
+  async function tourStep(n) {
+    if (!T) return;
+    if (n >= T.steps.length) return endTour();
+    T.i = n;
+    const s = T.steps[n], el = $('#tour'), bub = $('.tour-bubble', el);
+    bub.classList.add('hide'); bub.classList.remove('show');
+    let moved = false;
+    if (s.tab && S.tab !== s.tab) { showTab(s.tab); moved = true; }
+    if (s.planMode && S.planMode !== s.planMode) { S.planMode = s.planMode; renderPlan(); moved = true; }
+    if (s.agDay && S.agDay !== s.agDay) { S.agDay = s.agDay; renderPlan(); moved = true; }
+    await wait(moved ? 450 : 80);
+    if (!T || T.i !== n) return;
+    const target = tourTarget(s.target);
+    if (s.target && !target) return tourStep(n + 1);
+    if (target) { target.scrollIntoView({ block: 'center' }); await wait(120); if (!T || T.i !== n) return; }
+    const last = n === T.steps.length - 1;
+    $('h2', bub).textContent = s.title || '';
+    $('p', bub).textContent = s.body || '';
+    $('.tour-count', bub).textContent = n ? n + ' of ' + (T.steps.length - 1) : '';
+    $('[data-tour="next"]', bub).textContent = last ? 'Done' : (n === 0 ? 'Show me' : 'Next');
+    $('[data-tour="skip"]', bub).hidden = last;
+    T.target = target;
+    placeTour();
+    bub.classList.remove('hide'); void bub.offsetWidth; bub.classList.add('show');
+    // Views slide in, so follow the target for a moment until it settles.
+    const until = Date.now() + 700;
+    const follow = () => { if (T && T.i === n) { placeTour(); if (Date.now() < until) requestAnimationFrame(follow); } };
+    requestAnimationFrame(follow);
+    $('[data-tour="next"]', bub).focus({ preventScroll: true });
+  }
+  function placeTour() {
+    if (!T) return;
+    const el = $('#tour'), hole = $('.tour-hole', el), bub = $('.tour-bubble', el), arrow = $('.tour-arrow', bub);
+    const box = el.getBoundingClientRect(), vw = box.width, vh = box.height;
+    const bw = Math.min(340, vw - 32);
+    bub.style.width = bw + 'px';
+    const bh = bub.offsetHeight;
+    el.classList.toggle('dim', !T.target);
+    if (!T.target) {
+      hole.hidden = true; arrow.hidden = true;
+      bub.style.left = (vw - bw) / 2 + 'px'; bub.style.top = Math.max(60, (vh - bh) / 2 - 40) + 'px';
+      return;
+    }
+    const r = T.target.getBoundingClientRect(), pad = 6, gap = 14;
+    hole.hidden = false;
+    Object.assign(hole.style, { left: r.left - pad + 'px', top: r.top - pad + 'px', width: r.width + pad * 2 + 'px', height: r.height + pad * 2 + 'px' });
+    const below = r.top + r.height / 2 < vh / 2;
+    const top = Math.max(12, Math.min(below ? r.bottom + pad + gap : r.top - pad - gap - bh, vh - bh - 12));
+    const cx = r.left + r.width / 2;
+    const left = Math.max(16, Math.min(cx - bw / 2, vw - bw - 16));
+    bub.style.left = left + 'px'; bub.style.top = top + 'px';
+    arrow.hidden = false;
+    arrow.className = 'tour-arrow ' + (below ? 'up' : 'down');
+    arrow.style.left = Math.max(20, Math.min(cx - left, bw - 20)) + 'px';
+  }
+  function endTour() {
+    if (!T) return;
+    LS.set(tourKey(), true);
+    T = null;
+    const el = $('#tour');
+    if (el) { el.classList.add('out'); setTimeout(() => el.remove(), 260); }
+    S.planMode = LS.get('sdtrip_planmode', 'plan'); renderPlan();
+    showTab('now'); $('#view-now').scrollTop = 0;
+  }
+  window.addEventListener('resize', () => { if (T) placeTour(); });
+  document.addEventListener('keydown', (e) => { if (T && e.key === 'Escape') endTour(); });
+  document.addEventListener('click', (e) => { if (e.target.closest('#replay-tour')) { S.tourAsked = true; startTour(); } });
 
   // ---------- all ----------
   function renderAll() {

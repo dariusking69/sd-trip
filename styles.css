@@ -369,6 +369,28 @@ a { color: var(--gold); }
 .ag-star.pop { animation: starpop .38s var(--ease); }
 @keyframes starpop { 45% { transform: scale(1.2) rotate(-10deg); } }
 .ag-on { color: var(--teal); }
+/* ---------- first-run tour ---------- */
+.tour { position: fixed; left: 0; right: 0; top: 0; height: var(--app-h, 100dvh); z-index: 200; animation: fade .25s ease both; transition: background .3s, opacity .22s; }
+.tour.dim { background: var(--scrim); }
+.tour.out { opacity: 0; }
+.tour-hole {
+  position: absolute; border-radius: 16px; pointer-events: none; box-shadow: 0 0 0 200vmax var(--scrim);
+  transition: left .35s var(--ease), top .35s var(--ease), width .35s var(--ease), height .35s var(--ease);
+}
+.tour-hole::after { content: ""; position: absolute; inset: -3px; border-radius: 19px; border: 2px solid var(--gold); animation: tourpulse 1.6s ease-out infinite; }
+@keyframes tourpulse { 0% { opacity: .95; transform: scale(1); } 100% { opacity: 0; transform: scale(1.07); } }
+.tour-bubble { position: absolute; padding: 16px 16px 12px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--gold); box-shadow: var(--shadow); color: var(--ink); }
+.tour-bubble.hide { visibility: hidden; }
+.tour-bubble.show { animation: tourin .34s var(--ease) both; }
+@keyframes tourin { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+.tour-bubble h2 { margin: 0 0 6px; font-family: var(--display); font-weight: 800; font-size: 23px; line-height: 1; text-transform: uppercase; }
+.tour-bubble p { margin: 0; font-size: 15px; line-height: 1.45; color: var(--muted); }
+.tour-foot { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.tour-foot [hidden] { display: none; }
+.tour-count { margin-right: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.tour-arrow { position: absolute; width: 14px; height: 14px; background: var(--surface-2); border: 1px solid var(--gold); transform: translateX(-50%) rotate(45deg); }
+.tour-arrow.up { top: -8px; border-right: 0; border-bottom: 0; }
+.tour-arrow.down { bottom: -8px; border-left: 0; border-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
