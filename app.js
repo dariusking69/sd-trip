@@ -104,9 +104,14 @@
   const ICON_DIR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 20.5 4 13 21.5l-2.2-7.3z"/></svg>';
 
   // ---------- api ----------
+  // Google's web-app front end sometimes holds a request for a minute or more; give up after 25 s and retry.
   async function post(body) {
-    const res = await fetch(API, { method: 'POST', body: JSON.stringify(Object.assign({ k: S.key }, body)), redirect: 'follow' });
-    return res.json();
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl && setTimeout(() => ctl.abort(), 25000);
+    try {
+      const res = await fetch(API, { method: 'POST', body: JSON.stringify(Object.assign({ k: S.key }, body)), redirect: 'follow', signal: ctl ? ctl.signal : undefined });
+      return await res.json();
+    } finally { clearTimeout(timer); }
   }
 
   async function sync(quiet) {
@@ -126,6 +131,7 @@
     } catch (e) {
       const c = LS.get('sdtrip_cache', null);
       setSync('off', c ? 'Offline · saved copy' : 'Offline');
+      clearTimeout(S.retry); S.retry = setTimeout(() => sync(true), S.trip ? 60000 : 5000);
     } finally {
       S.syncing = false;
     }
